@@ -1,10 +1,6 @@
-%if "%{_vendor}" == "clr"
-Name     : docker
-%else
 Name     : clear-containers-docker
-%endif
 Version  : 1.8.1
-Release  : 37
+Release  : 38
 URL      : https://github.com/docker/docker/archive/v1.8.1.tar.gz
 Source0  : https://github.com/docker/docker/archive/v1.8.1.tar.gz
 Summary  : the open-source application container engine
@@ -26,9 +22,7 @@ BuildRequires : pkgconfig(devmapper)
 BuildRequires : btrfs-progs-devel
 Requires : kvmtool
 Requires : linux-container
-%if "%{_vendor}" != "clr"
 Conflicts : docker
-%endif
 
 # don't strip, these are not ordinary object files
 %global __os_install_post %{nil}
