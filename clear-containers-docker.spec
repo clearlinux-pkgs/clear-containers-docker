@@ -1,6 +1,6 @@
 Name     : clear-containers-docker
 Version  : 1.8.1
-Release  : 38
+Release  : 39
 URL      : https://github.com/docker/docker/archive/v1.8.1.tar.gz
 Source0  : https://github.com/docker/docker/archive/v1.8.1.tar.gz
 Summary  : the open-source application container engine
