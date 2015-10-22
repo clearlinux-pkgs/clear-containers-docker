@@ -1,18 +1,14 @@
 Name     : clear-containers-docker
-Version  : 1.8.1
-Release  : 39
-URL      : https://github.com/docker/docker/archive/v1.8.1.tar.gz
-Source0  : https://github.com/docker/docker/archive/v1.8.1.tar.gz
+Version  : 1.8.3
+Release  : 1
+URL      : https://github.com/docker/docker/archive/v1.8.3.tar.gz
+Source0  : https://github.com/docker/docker/archive/v1.8.3.tar.gz
 Summary  : the open-source application container engine
 Group    : Development/Tools
 License  : Apache-2.0
 Patch1   : 0001-Add-go-md2man-sources.patch
 Patch2   : 0001-Drop-socket-group-docker.patch
-Patch401 : 0001-devicemapper-fix-zero-sized-field-access.patch
-Patch402 : 0002-Clear-Containers-for-Docker-Engine-execution-driver.patch
-Patch403 : 0003-Properly-find-the-right-Endpoint-to-steal-networking.patch
-Patch404 : 0004-Fix-ups.patch
-Patch405 : 0005-Change-version-tag.patch
+Patch401 : 0001-clr-containers-for-docker.patch 
 
 
 BuildRequires : go
@@ -29,9 +25,8 @@ Conflicts : docker
 %define debug_package %{nil}
 %define __strip /bin/true
 
-# This matches v1.8.1 tag/tarball from https://github.com/docker/docker/releases
-%define commit_id d12ea79-clear-containers
-
+# This matches v1.8.3 tag/tarball from https://github.com/docker/docker/releases
+%define commit_id f4bf5c7-clear-containers
 
 %description
 Docker Core Engine
@@ -43,10 +38,6 @@ Docker Core Engine
 %patch2 -p1
 %endif
 %patch401 -p1
-%patch402 -p1
-%patch403 -p1
-%patch404 -p1
-%patch405 -p1
 
 %build
 export DOCKER_GITCOMMIT=%commit_id AUTO_GOPATH=1 GOROOT=/usr/lib/golang
