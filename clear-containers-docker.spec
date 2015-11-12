@@ -1,15 +1,18 @@
 Name     : clear-containers-docker
-Version  : 1.8.3
+Version  : 1.9.0
 Release  : 1
-URL      : https://github.com/docker/docker/archive/v1.8.3.tar.gz
-Source0  : https://github.com/docker/docker/archive/v1.8.3.tar.gz
+URL      : https://github.com/docker/docker/archive/v1.9.0.tar.gz
+Source0  : https://github.com/docker/docker/archive/v1.9.0.tar.gz
 Summary  : the open-source application container engine
 Group    : Development/Tools
 License  : Apache-2.0
+
 Patch1   : 0001-Add-go-md2man-sources.patch
 Patch2   : 0001-Drop-socket-group-docker.patch
-Patch401 : 0001-clr-containers-for-docker.patch 
 
+Patch401 : 0001-Dockerfile-add-kvmtool-and-linux-container-for-clr-e.patch
+Patch402 : 0002-Clear-Containers-for-Docker-Engine-v1.9.0.patch
+Patch403 : 0003-Clear-Linux-VERSION-and-default-exec-driver.patch
 
 BuildRequires : go
 BuildRequires : glibc-staticdev
@@ -25,8 +28,8 @@ Conflicts : docker
 %define debug_package %{nil}
 %define __strip /bin/true
 
-# This matches v1.8.3 tag/tarball from https://github.com/docker/docker/releases
-%define commit_id f4bf5c7-clear-containers
+# This matches v1.9.0 tag/tarball from https://github.com/docker/docker/releases
+%define commit_id 76d6bc9-clear-containers
 
 %description
 Docker Core Engine
@@ -38,6 +41,8 @@ Docker Core Engine
 %patch2 -p1
 %endif
 %patch401 -p1
+%patch402 -p1
+%patch403 -p1
 
 %build
 export DOCKER_GITCOMMIT=%commit_id AUTO_GOPATH=1 GOROOT=/usr/lib/golang
