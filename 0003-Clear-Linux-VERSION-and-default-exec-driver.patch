@@ -1,0 +1,34 @@
+From b9b48770dd43ffcb11640f4f5561defcec67e108 Mon Sep 17 00:00:00 2001
+From: James Hunt <james.o.hunt@intel.com>
+Date: Thu, 12 Nov 2015 17:17:06 +0000
+Subject: [PATCH 3/3] Clear Linux VERSION and default exec driver.
+
+Signed-off-by: James Hunt <james.o.hunt@intel.com>
+---
+ VERSION               | 2 +-
+ daemon/config_unix.go | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/VERSION b/VERSION
+index f8e233b..dcf4198 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.9.0
++1.9.0-clear-containers
+diff --git a/daemon/config_unix.go b/daemon/config_unix.go
+index 3ae67ca..237cda8 100644
+--- a/daemon/config_unix.go
++++ b/daemon/config_unix.go
+@@ -13,7 +13,7 @@ import (
+ var (
+ 	defaultPidFile = "/var/run/docker.pid"
+ 	defaultGraph   = "/var/lib/docker"
+-	defaultExec    = "native"
++	defaultExec    = "clr"
+ )
+ 
+ // Config defines the configuration of a docker daemon.
+-- 
+2.5.0
+

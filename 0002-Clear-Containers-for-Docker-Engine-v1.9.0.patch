@@ -1,47 +1,30 @@
-From e45d0eb532a799073ec4f17be432f2d08a6c2a14 Mon Sep 17 00:00:00 2001
-From: Dimitri John Ledkov <dimitri.j.ledkov@intel.com>
-Date: Tue, 9 Jun 2015 11:05:16 +0100
-Subject: [PATCH 2/4] Clear Containers for Docker Engine execution driver
-Organization: Intel Corporation (UK) Ltd. - Co. Reg. #1134945 - Pipers Way, Swindon SN3 1RJ
+From 6928729cf9d718d30fbba96e195d250877d9e3da Mon Sep 17 00:00:00 2001
+From: James Hunt <james.o.hunt@intel.com>
+Date: Wed, 28 Oct 2015 16:50:00 +0000
+Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.0)
 
-Signed-off-by: Dimitri John Ledkov <dimitri.j.ledkov@intel.com>
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
-Signed-off-by: Michael Doherty <michael.i.doherty@intel.com>
 ---
- daemon/config_linux.go                             |   2 +-
- daemon/execdriver/clr/driver.go                    | 717 +++++++++++++++++++++
+ daemon/execdriver/clr/driver.go                    | 743 +++++++++++++++++++++
  daemon/execdriver/clr/info.go                      |  51 ++
  daemon/execdriver/clr/init.go                      |  97 +++
- daemon/execdriver/driver.go                        |  59 +-
+ daemon/execdriver/driver.go                        |   6 +
  daemon/execdriver/execdrivers/execdrivers_linux.go |   6 +-
- daemon/monitor.go                                  |  24 +
+ daemon/monitor.go                                  |  26 +
  .../operatingsystem/operatingsystem_linux.go       |  13 +-
  .../docker/libnetwork/drivers/bridge/bridge.go     |  12 +-
- .../docker/libnetwork/netlabel/labels.go           |  11 +
- 10 files changed, 960 insertions(+), 32 deletions(-)
+ .../docker/libnetwork/netlabel/labels.go           |  16 +
+ 9 files changed, 966 insertions(+), 4 deletions(-)
  create mode 100644 daemon/execdriver/clr/driver.go
  create mode 100644 daemon/execdriver/clr/info.go
  create mode 100644 daemon/execdriver/clr/init.go
 
-diff --git a/daemon/config_linux.go b/daemon/config_linux.go
-index 783637e..2a930b9 100644
---- a/daemon/config_linux.go
-+++ b/daemon/config_linux.go
-@@ -11,7 +11,7 @@ import (
- var (
- 	defaultPidFile = "/var/run/docker.pid"
- 	defaultGraph   = "/var/lib/docker"
--	defaultExec    = "native"
-+	defaultExec    = "clr"
- )
- 
- // Config defines the configuration of a docker daemon.
 diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
 new file mode 100644
-index 0000000..679471a
+index 0000000..69fb6f4
 --- /dev/null
 +++ b/daemon/execdriver/clr/driver.go
-@@ -0,0 +1,717 @@
+@@ -0,0 +1,743 @@
 +// +build linux
 +
 +package clr
@@ -103,6 +86,9 @@ index 0000000..679471a
 +	machineMemory    int64
 +	containerPid     int
 +	sync.Mutex
++	ipaddr  string
++	gateway string
++	macaddr string
 +}
 +
 +type activeContainer struct {
@@ -233,7 +219,7 @@ index 0000000..679471a
 +	return fmt.Sprintf("%s-%s", driverName, d.version)
 +}
 +
-+func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (execdriver.ExitStatus, error) {
++func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, hooks execdriver.Hooks) (execdriver.ExitStatus, error) {
 +	var (
 +		term execdriver.Terminal
 +		err  error
@@ -341,9 +327,6 @@ index 0000000..679471a
 +	memory := fmt.Sprintf("%d", memoryMiB)
 +	// FIXME: Locked cores to 6 ?
 +	cores := fmt.Sprintf("%d", 6)
-+	ipaddr := c.NetworkSettings.IPAddress
-+	gateway := c.NetworkSettings.Gateway
-+	macaddr := c.NetworkSettings.MacAddress
 +
 +	args = append(args, c.ProcessConfig.Entrypoint)
 +	args = append(args, c.ProcessConfig.Arguments...)
@@ -352,7 +335,7 @@ index 0000000..679471a
 +		"init=/usr/lib/systemd/systemd systemd.unit=container.target rw tsc=reliable "+
 +		"systemd.show_status=false "+
 +		"no_timer_check rcupdate.rcu_expedited=1 console=hvc0 quiet ip=%s::%s::%s::off",
-+		ipaddr, gateway, hostname)
++		d.ipaddr, d.gateway, hostname)
 +
 +	params := []string{
 +		lkvmName, "run", "-c", cores, "-m", memory,
@@ -360,7 +343,7 @@ index 0000000..679471a
 +		"--kernel", clrKernel,
 +		"--params", rootParams,
 +		"--shmem", fmt.Sprintf("0x200000000:0:file=%s:private", img),
-+		"--network", fmt.Sprintf("mode=tap,script=none,tapif=%s,guest_mac=%s", ifname, macaddr),
++		"--network", fmt.Sprintf("mode=tap,script=none,tapif=%s,guest_mac=%s", ifname, d.macaddr),
 +		"--9p", fmt.Sprintf("%s,rootfs", c.Rootfs),
 +	}
 +
@@ -398,12 +381,15 @@ index 0000000..679471a
 +	}()
 +
 +	// FIXME: need to create state.json for Stats() to work.
-+	c.ContainerPid = c.ProcessConfig.Process.Pid
-+	d.containerPid = c.ProcessConfig.Process.Pid
++	pid := c.ProcessConfig.Process.Pid
++	c.ContainerPid = pid
++	d.containerPid = pid
 +
-+	if startCallback != nil {
++	if hooks.Start != nil {
 +		logrus.Debugf("Invoking startCallback")
-+		startCallback(&c.ProcessConfig, c.ProcessConfig.Process.Pid)
++		chOOM := make(chan struct{})
++		close(chOOM)
++		hooks.Start(&c.ProcessConfig, pid, chOOM)
 +	}
 +
 +	// FIXME:
@@ -671,7 +657,7 @@ index 0000000..679471a
 +	return t.MasterPty.Close()
 +}
 +
-+func (d *driver) Exec(c *execdriver.Command, processConfig *execdriver.ProcessConfig, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (int, error) {
++func (d *driver) Exec(c *execdriver.Command, processConfig *execdriver.ProcessConfig, pipes *execdriver.Pipes, hooks execdriver.Hooks) (int, error) {
 +	return -1, fmt.Errorf("Unsupported: Exec is not supported by the %q driver", driverName)
 +
 +}
@@ -718,34 +704,53 @@ index 0000000..679471a
 +	var bridgeLinkName string
 +	var output []byte
 +	var err error
++	var ok bool
 +
-+	if len(c.EndpointInfo) == 1 {
-+		e := c.EndpointInfo[0]
-+		bridgeName = e[netlabel.BridgeName].(string)
-+		bridgeLinkName = e[netlabel.BridgeLinkName].(string)
++	bridge := c.NetworkSettings.Networks["bridge"]
++	if bridge == nil {
++		return fmt.Errorf("no bridge network available")
++	}
++
++	d.ipaddr = bridge.IPAddress
++	d.macaddr = bridge.MacAddress
++	d.gateway = bridge.Gateway
++
++	// Extract the bridge details from the relevant endpoint.
++	for _, info := range c.EndpointInfo {
++		if _, ok = info[netlabel.BridgeEID].(string); !ok {
++			continue
++		}
++
++		if bridgeName, ok = info[netlabel.BridgeName].(string); !ok {
++			return fmt.Errorf("unable to determine bridge name")
++		}
++
++		if bridgeLinkName, ok = info[netlabel.BridgeLinkName].(string); !ok {
++			return fmt.Errorf("unable to determine bridge link name")
++		}
 +	}
 +
 +	// Strip existing veth
 +	cmd := exec.Command("ip", "link", "del", bridgeLinkName)
 +	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("%s setupNetwork error: %s", driverName, output)
++		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
 +		return err
 +	}
 +
 +	cmd = exec.Command("ip", "tuntap", "add", "dev", ifname, "mode", "tap", "vnet_hdr")
 +	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("%s setupNetwork error: %s", driverName, output)
++		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
 +		return err
 +	}
 +	cmd = exec.Command("ip", "link", "set", "dev", ifname, "master", bridgeName)
 +	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("%s setupNetwork error: %s", driverName, output)
++		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
 +		return err
 +	}
 +
 +	cmd = exec.Command("ip", "link", "set", "dev", ifname, "up")
 +	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("%s setupNetwork error: %s", driverName, output)
++		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
 +		return err
 +	}
 +
@@ -758,6 +763,10 @@ index 0000000..679471a
 +	}
 +	// FIXME:
 +	return execdriver.Stats(d.containerDir(id), d.activeContainers[id].container.Cgroups.Memory, d.machineMemory)
++}
++
++func (d *driver) SupportsHooks() bool {
++	return false
 +}
 diff --git a/daemon/execdriver/clr/info.go b/daemon/execdriver/clr/info.go
 new file mode 100644
@@ -920,12 +929,12 @@ index 0000000..8c999e4
 +	return nil
 +}
 diff --git a/daemon/execdriver/driver.go b/daemon/execdriver/driver.go
-index bd2e24c..53dff22 100644
+index e88ea0b..aeec945 100644
 --- a/daemon/execdriver/driver.go
 +++ b/daemon/execdriver/driver.go
-@@ -7,7 +7,9 @@ import (
- 	"time"
+@@ -8,7 +8,9 @@ import (
  
+ 	"github.com/docker/docker/pkg/idtools"
  	// TODO Windows: Factor out ulimit
 +	"github.com/docker/docker/daemon/network"
  	"github.com/docker/docker/pkg/ulimit"
@@ -933,73 +942,20 @@ index bd2e24c..53dff22 100644
  	"github.com/opencontainers/runc/libcontainer"
  	"github.com/opencontainers/runc/libcontainer/configs"
  )
-@@ -150,31 +152,34 @@ type ProcessConfig struct {
- //
- // Process wrapps an os/exec.Cmd to add more metadata
- type Command struct {
--	ID                 string            `json:"id"`
--	Rootfs             string            `json:"rootfs"` // root fs of the container
--	ReadonlyRootfs     bool              `json:"readonly_rootfs"`
--	InitPath           string            `json:"initpath"` // dockerinit
--	WorkingDir         string            `json:"working_dir"`
--	ConfigPath         string            `json:"config_path"` // this should be able to be removed when the lxc template is moved into the driver
--	Network            *Network          `json:"network"`
--	Ipc                *Ipc              `json:"ipc"`
--	Pid                *Pid              `json:"pid"`
--	UTS                *UTS              `json:"uts"`
--	Resources          *Resources        `json:"resources"`
--	Mounts             []Mount           `json:"mounts"`
--	AllowedDevices     []*configs.Device `json:"allowed_devices"`
--	AutoCreatedDevices []*configs.Device `json:"autocreated_devices"`
--	CapAdd             []string          `json:"cap_add"`
--	CapDrop            []string          `json:"cap_drop"`
--	GroupAdd           []string          `json:"group_add"`
--	ContainerPid       int               `json:"container_pid"`  // the pid for the process inside a container
--	ProcessConfig      ProcessConfig     `json:"process_config"` // Describes the init process of the container.
--	ProcessLabel       string            `json:"process_label"`
--	MountLabel         string            `json:"mount_label"`
--	LxcConfig          []string          `json:"lxc_config"`
--	AppArmorProfile    string            `json:"apparmor_profile"`
--	CgroupParent       string            `json:"cgroup_parent"` // The parent cgroup for this command.
--	FirstStart         bool              `json:"first_start"`
--	LayerPaths         []string          `json:"layer_paths"` // Windows needs to know the layer paths and folder for a command
--	LayerFolder        string            `json:"layer_folder"`
-+	ID                 string                   `json:"id"`
-+	Rootfs             string                   `json:"rootfs"` // root fs of the container
-+	ReadonlyRootfs     bool                     `json:"readonly_rootfs"`
-+	InitPath           string                   `json:"initpath"` // dockerinit
-+	WorkingDir         string                   `json:"working_dir"`
-+	ConfigPath         string                   `json:"config_path"` // this should be able to be removed when the lxc template is moved into the driver
-+	Network            *Network                 `json:"network"`
-+	Ipc                *Ipc                     `json:"ipc"`
-+	Pid                *Pid                     `json:"pid"`
-+	UTS                *UTS                     `json:"uts"`
-+	Resources          *Resources               `json:"resources"`
-+	Mounts             []Mount                  `json:"mounts"`
-+	AllowedDevices     []*configs.Device        `json:"allowed_devices"`
-+	AutoCreatedDevices []*configs.Device        `json:"autocreated_devices"`
-+	CapAdd             []string                 `json:"cap_add"`
-+	CapDrop            []string                 `json:"cap_drop"`
-+	GroupAdd           []string                 `json:"group_add"`
-+	ContainerPid       int                      `json:"container_pid"`  // the pid for the process inside a container
-+	ProcessConfig      ProcessConfig            `json:"process_config"` // Describes the init process of the container.
-+	ProcessLabel       string                   `json:"process_label"`
-+	MountLabel         string                   `json:"mount_label"`
-+	LxcConfig          []string                 `json:"lxc_config"`
-+	AppArmorProfile    string                   `json:"apparmor_profile"`
-+	CgroupParent       string                   `json:"cgroup_parent"` // The parent cgroup for this command.
-+	FirstStart         bool                     `json:"first_start"`
-+	LayerPaths         []string                 `json:"layer_paths"` // Windows needs to know the layer paths and folder for a command
-+	LayerFolder        string                   `json:"layer_folder"`
+@@ -230,4 +232,8 @@ type Command struct {
+ 	LayerPaths         []string          `json:"layer_paths"` // Windows needs to know the layer paths and folder for a command
+ 	LayerFolder        string            `json:"layer_folder"`
+ 	Hostname           string            `json:"hostname"` // Windows sets the hostname in the execdriver
 +	NetworkSettings    *network.Settings        `json:"network_settings"`
-+	EndpointInfo       []map[string]interface{} `json:"endpoint_info"`
-+	HostConfig         *runconfig.HostConfig
++	EndpointInfo      []map[string]interface{} `json:"endpoint_info"`
++	HostConfig         *runconfig.HostConfig `json:"hostconfig"`
++
  }
 diff --git a/daemon/execdriver/execdrivers/execdrivers_linux.go b/daemon/execdriver/execdrivers/execdrivers_linux.go
-index bbad304..8ed27d3 100644
+index f4785a6..a4149dc 100644
 --- a/daemon/execdriver/execdrivers/execdrivers_linux.go
 +++ b/daemon/execdriver/execdrivers/execdrivers_linux.go
-@@ -8,13 +8,17 @@ import (
+@@ -8,6 +8,7 @@ import (
  
  	"github.com/Sirupsen/logrus"
  	"github.com/docker/docker/daemon/execdriver"
@@ -1007,8 +963,9 @@ index bbad304..8ed27d3 100644
  	"github.com/docker/docker/daemon/execdriver/lxc"
  	"github.com/docker/docker/daemon/execdriver/native"
  	"github.com/docker/docker/pkg/sysinfo"
- )
+@@ -15,7 +16,10 @@ import (
  
+ // NewDriver returns a new execdriver.Driver from the given name configured with the provided options.
  func NewDriver(name string, options []string, root, libPath, initPath string, sysInfo *sysinfo.SysInfo) (execdriver.Driver, error) {
 +	rootPath := path.Join(root, "execdriver", name)
  	switch name {
@@ -1017,7 +974,7 @@ index bbad304..8ed27d3 100644
  	case "lxc":
  		// we want to give the lxc driver the full docker root because it needs
  		// to access and write config and template files in /var/lib/docker/containers/*
-@@ -22,7 +26,7 @@ func NewDriver(name string, options []string, root, libPath, initPath string, sy
+@@ -23,7 +27,7 @@ func NewDriver(name string, options []string, root, libPath, initPath string, sy
  		logrus.Warn("LXC built-in support is deprecated.")
  		return lxc.NewDriver(root, libPath, initPath, sysInfo.AppArmor)
  	case "native":
@@ -1027,10 +984,10 @@ index bbad304..8ed27d3 100644
  	return nil, fmt.Errorf("unknown exec driver %s", name)
  }
 diff --git a/daemon/monitor.go b/daemon/monitor.go
-index 1f02057..d8de44b 100644
+index 4af0d2a..710d924 100644
 --- a/daemon/monitor.go
 +++ b/daemon/monitor.go
-@@ -138,6 +138,30 @@ func (m *containerMonitor) Start() error {
+@@ -142,6 +142,32 @@ func (m *containerMonitor) Start() error {
  
  		m.lastStartTime = time.Now()
  
@@ -1042,30 +999,32 @@ index 1f02057..d8de44b 100644
 +		m.container.command.HostConfig = m.container.hostConfig
 +
 +		// Make the network endpoint details available to the execution
-+		// driver as well.
-+		n, _err := m.container.daemon.netController.NetworkByID(m.container.NetworkSettings.NetworkID)
-+		if _err == nil {
-+			var eps []map[string]interface{}
++		// driver, to allow it to determine the bridge name.
++		for name, _ := range m.container.NetworkSettings.Networks {
++			n, _err := m.container.daemon.netController.NetworkByName(name)
++			if _err == nil {
++				var eps []map[string]interface{}
 +
-+			for _, ep := range n.Endpoints() {
-+				info, err := ep.DriverInfo()
-+				if err != nil {
-+					continue
++				for _, ep := range n.Endpoints() {
++					info, err := ep.DriverInfo()
++					if err != nil {
++						continue
++					}
++					eps = append(eps, info)
 +				}
-+				eps = append(eps, info)
-+			}
 +
-+			m.container.command.EndpointInfo = eps
++				m.container.command.EndpointInfo = eps
++			}
 +		}
 +
- 		if exitStatus, err = m.container.daemon.Run(m.container, pipes, m.callback); err != nil {
+ 		if exitStatus, err = m.container.daemon.run(m.container, pipes, m.callback); err != nil {
  			// if we receive an internal error from the initial start of a container then lets
  			// return it instead of entering the restart loop
 diff --git a/pkg/parsers/operatingsystem/operatingsystem_linux.go b/pkg/parsers/operatingsystem/operatingsystem_linux.go
-index af185f9..1586ed7 100644
+index ca8ea8f..fa50e45 100644
 --- a/pkg/parsers/operatingsystem/operatingsystem_linux.go
 +++ b/pkg/parsers/operatingsystem/operatingsystem_linux.go
-@@ -4,6 +4,7 @@ import (
+@@ -6,6 +6,7 @@ import (
  	"bytes"
  	"errors"
  	"io/ioutil"
@@ -1073,7 +1032,7 @@ index af185f9..1586ed7 100644
  )
  
  var (
-@@ -12,12 +13,22 @@ var (
+@@ -14,13 +15,23 @@ var (
  
  	// file to check to determine Operating System
  	etcOsRelease = "/etc/os-release"
@@ -1082,6 +1041,7 @@ index af185f9..1586ed7 100644
 +	altEtcOSRelease = "/usr/lib/os-release"
  )
  
+ // GetOperatingSystem gets the name of the current operating system.
  func GetOperatingSystem() (string, error) {
  	b, err := ioutil.ReadFile(etcOsRelease)
  	if err != nil {
@@ -1098,18 +1058,18 @@ index af185f9..1586ed7 100644
  	if i := bytes.Index(b, []byte("PRETTY_NAME")); i >= 0 {
  		b = b[i+13:]
 diff --git a/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go b/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
-index 8fc05ae..83ebb57 100644
+index 6124ccb..83c02cd 100644
 --- a/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
 +++ b/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
-@@ -89,6 +89,7 @@ type bridgeNetwork struct {
- 	config     *networkConfiguration
- 	endpoints  map[types.UUID]*bridgeEndpoint // key: endpoint id
+@@ -98,6 +98,7 @@ type bridgeNetwork struct {
+ 	endpoints  map[string]*bridgeEndpoint // key: endpoint id
  	portMapper *portmapper.PortMapper
+ 	driver     *driver // The network's driver
 +	veth       *netlink.Veth
  	sync.Mutex
  }
  
-@@ -894,11 +895,13 @@ func (d *driver) CreateEndpoint(nid, eid types.UUID, epInfo driverapi.EndpointIn
+@@ -870,11 +871,13 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
  		return err
  	}
  
@@ -1122,43 +1082,48 @@ index 8fc05ae..83ebb57 100644
  		PeerName:  containerIfName}
 -	if err = netlink.LinkAdd(veth); err != nil {
 +	if err = netlink.LinkAdd(n.veth); err != nil {
- 		return err
+ 		return types.InternalErrorf("failed to add the host (%s) <=> sandbox (%s) pair interfaces: %v", hostIfName, containerIfName, err)
  	}
  
-@@ -1163,6 +1166,11 @@ func (d *driver) EndpointOperInfo(nid, eid types.UUID) (map[string]interface{},
+@@ -1100,6 +1103,11 @@ func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, erro
  		m[netlabel.MacAddress] = ep.macAddress
  	}
  
 +	// Add details of the bridge
 +	m[netlabel.BridgeName] = n.config.BridgeName
-+	m[netlabel.BridgePeername] = n.veth.PeerName
 +	m[netlabel.BridgeLinkName] = n.veth.LinkAttrs.Name
++	m[netlabel.BridgeEID] = eid
 +
  	return m, nil
  }
  
 diff --git a/vendor/src/github.com/docker/libnetwork/netlabel/labels.go b/vendor/src/github.com/docker/libnetwork/netlabel/labels.go
-index 42779be..cd2344b 100644
+index cb0c2f5..cb4385f 100644
 --- a/vendor/src/github.com/docker/libnetwork/netlabel/labels.go
 +++ b/vendor/src/github.com/docker/libnetwork/netlabel/labels.go
-@@ -24,6 +24,17 @@ const (
- 	//EnableIPv6 constant represents enabling IPV6 at network level
- 	EnableIPv6 = Prefix + ".enable_ipv6"
+@@ -33,6 +33,22 @@ const (
+ 	// DriverMTU constant represents the MTU size for the network driver
+ 	DriverMTU = DriverPrefix + ".mtu"
  
 +	// BridgeName constant represents the name of the network bridge
 +	BridgeName = "io.docker.network.bridge.name"
 +
-+	// BridgePeername constant represents the interface name provided to
-+	// the container.
-+	BridgePeername = "io.docker.network.bridge.peername"
++	// BridgeEID is the endpoint ID for the bridge
++	BridgeEID = "io.docker.network.bridge.endpoint_id"
 +
 +	// BridgeLinkName constant represents the interface name created on
 +	// the host side.
 +	BridgeLinkName = "io.docker.network.bridge.linkname"
 +
- 	// KVProvider constant represents the KV provider backend
- 	KVProvider = DriverPrefix + ".kv_provider"
++	// KVProvider constant represents the KV provider backend
++	KVProvider = DriverPrefix + ".kv_provider"
++
++	// KVProviderURL constant represents the KV provider URL
++	KVProviderURL = DriverPrefix + ".kv_provider_url"
++
+ 	// OverlayBindInterface constant represents overlay driver bind interface
+ 	OverlayBindInterface = DriverPrefix + ".overlay.bind_interface"
  
 -- 
-2.1.4
+2.5.0
 
