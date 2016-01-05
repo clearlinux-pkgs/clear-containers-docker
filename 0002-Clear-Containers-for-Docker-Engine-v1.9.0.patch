@@ -1,7 +1,7 @@
 From 6928729cf9d718d30fbba96e195d250877d9e3da Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Wed, 28 Oct 2015 16:50:00 +0000
-Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.0)
+Subject: [PATCH 2/4] Clear Containers for Docker Engine (v1.9.0)
 
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
 ---

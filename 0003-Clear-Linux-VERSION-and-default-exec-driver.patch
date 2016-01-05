@@ -1,7 +1,7 @@
 From b9b48770dd43ffcb11640f4f5561defcec67e108 Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Thu, 12 Nov 2015 17:17:06 +0000
-Subject: [PATCH 3/3] Clear Linux VERSION and default exec driver.
+Subject: [PATCH 3/4] Clear Linux VERSION and default exec driver.
 
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
 ---

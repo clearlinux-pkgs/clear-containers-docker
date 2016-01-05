@@ -1,0 +1,55 @@
+From 0c20f60402530fc1f309521f05b79ef0e217c096 Mon Sep 17 00:00:00 2001
+From: James Hunt <james.o.hunt@intel.com>
+Date: Tue, 5 Jan 2016 13:47:21 +0000
+Subject: [PATCH 4/4] Only remove the container end of the veth pair if it
+ exists.
+
+Signed-off-by: James Hunt <james.o.hunt@intel.com>
+---
+ daemon/execdriver/clr/driver.go | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
+index 69fb6f4..1e12a98 100644
+--- a/daemon/execdriver/clr/driver.go
++++ b/daemon/execdriver/clr/driver.go
+@@ -670,6 +670,13 @@ func (d *driver) generateDockerInit(c *execdriver.Command) error {
+ 	return ioutil.WriteFile(p, data, 0755)
+ }
+ 
++func (d *driver) linkExists(name string) bool {
++	cmd := exec.Command("ip", "link", "show", name)
++	err := cmd.Run()
++
++	return err == nil
++}
++
+ func (d *driver) setupNetwork(c *execdriver.Command) error {
+ 	ifname := getTapIf(c)
+ 
+@@ -703,14 +710,16 @@ func (d *driver) setupNetwork(c *execdriver.Command) error {
+ 		}
+ 	}
+ 
+-	// Strip existing veth
+-	cmd := exec.Command("ip", "link", "del", bridgeLinkName)
+-	if output, err = cmd.CombinedOutput(); err != nil {
+-		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
+-		return err
++	// Strip existing veth if it exists
++	if bridgeLinkName != "" && d.linkExists(bridgeLinkName) {
++		cmd := exec.Command("ip", "link", "del", bridgeLinkName)
++		if output, err = cmd.CombinedOutput(); err != nil {
++			logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
++			return err
++		}
+ 	}
+ 
+-	cmd = exec.Command("ip", "tuntap", "add", "dev", ifname, "mode", "tap", "vnet_hdr")
++	cmd := exec.Command("ip", "tuntap", "add", "dev", ifname, "mode", "tap", "vnet_hdr")
+ 	if output, err = cmd.CombinedOutput(); err != nil {
+ 		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
+ 		return err
+-- 
+2.5.0
+
