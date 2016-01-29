@@ -1,11 +1,11 @@
-From 6928729cf9d718d30fbba96e195d250877d9e3da Mon Sep 17 00:00:00 2001
+From 8a4170a5ff88eb6b5a1e38b8c992433944072964 Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Wed, 28 Oct 2015 16:50:00 +0000
-Subject: [PATCH 2/4] Clear Containers for Docker Engine (v1.9.0)
+Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.0)
 
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
 ---
- daemon/execdriver/clr/driver.go                    | 743 +++++++++++++++++++++
+ daemon/execdriver/clr/driver.go                    | 949 +++++++++++++++++++++
  daemon/execdriver/clr/info.go                      |  51 ++
  daemon/execdriver/clr/init.go                      |  97 +++
  daemon/execdriver/driver.go                        |   6 +
@@ -14,30 +14,34 @@ Signed-off-by: James Hunt <james.o.hunt@intel.com>
  .../operatingsystem/operatingsystem_linux.go       |  13 +-
  .../docker/libnetwork/drivers/bridge/bridge.go     |  12 +-
  .../docker/libnetwork/netlabel/labels.go           |  16 +
- 9 files changed, 966 insertions(+), 4 deletions(-)
+ 9 files changed, 1172 insertions(+), 4 deletions(-)
  create mode 100644 daemon/execdriver/clr/driver.go
  create mode 100644 daemon/execdriver/clr/info.go
  create mode 100644 daemon/execdriver/clr/init.go
 
 diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
 new file mode 100644
-index 0000000..69fb6f4
+index 0000000..6695309
 --- /dev/null
 +++ b/daemon/execdriver/clr/driver.go
-@@ -0,0 +1,743 @@
+@@ -0,0 +1,949 @@
 +// +build linux
 +
 +package clr
 +
 +import (
++	"crypto/sha512"
++	"errors"
 +	"fmt"
 +	"io"
 +	"io/ioutil"
 +	"math"
 +	"net/http"
++	"net/url"
 +	"os"
 +	"os/exec"
 +	"path"
++	"path/filepath"
 +	"strconv"
 +	"strings"
 +	"sync"
@@ -64,6 +68,9 @@ index 0000000..69fb6f4
 +
 +	// local "latest" information
 +	clrFile = "latest"
++
++	// ASCII file containing a checksums for the downloaded image.
++	clrChecksumFile = "SHA512SUMS"
 +
 +	// upstream base URL
 +	clrURL = "https://download.clearlinux.org"
@@ -96,10 +103,58 @@ index 0000000..69fb6f4
 +	cmd       *exec.Cmd
 +}
 +
++type ProgressReader struct {
++	// The real reader
++	io.Reader
++
++	// Total size of download
++	total uint64
++
++	// Bytes received
++	bytes uint64
++
++	// Rate-limiting counter
++	lastShown int
++
++	rawURL string
++}
++
++// Read implements the Reader interface by calling the _real_ reader
++// and periodically displaying progress information.
++func (r *ProgressReader) Read(p []byte) (n int, err error) {
++	n, err = r.Reader.Read(p)
++
++	if err != nil && err != io.EOF {
++		// A true error occured
++		return n, err
++	}
++
++	r.bytes += uint64(n)
++
++	if r.total == 0 {
++		// http header did not provide size
++		logrus.Debugf("Read %v bytes from %v", r.bytes, r.rawURL)
++	} else {
++		percent := (float64(r.bytes) / float64(r.total)) * 100
++
++		// rate-limit to only display messages for every 10% downloaded
++		next := int(percent / 10)
++
++		if r.lastShown == -1 || next > r.lastShown {
++			logrus.Debugf("Read %v of %v bytes from %v (%2.2f%%)", r.bytes, r.total, r.rawURL, percent)
++			r.lastShown = next
++		}
++	}
++
++	return n, err
++}
++
 +func getTapIf(c *execdriver.Command) string {
 +	return fmt.Sprintf("tb-%s", c.ID[:12])
 +}
 +
++// getClrVersion reads the latest image version from the
++// locally-downloaded "latest" file.
 +func getClrVersion(libPath string) string {
 +	txt, err := ioutil.ReadFile(path.Join(libPath, clrFile))
 +	if err != nil {
@@ -108,61 +163,56 @@ index 0000000..69fb6f4
 +	return strings.Split(string(txt), "\n")[0]
 +}
 +
-+func fetchLatest(libPath string) error {
-+	out, err := os.Create(path.Join(libPath, clrFile))
++func getURL(rawURL, outfile string) error {
++
++	_url, err := url.Parse(rawURL)
++	if err != nil {
++		return err
++	}
++
++	out, err := os.Create(outfile)
 +	if err != nil {
 +		return err
 +	}
 +	defer out.Close()
 +
-+	resp, err := http.Get(latestFile)
++	transport := &http.Transport{Proxy: http.ProxyFromEnvironment}
++	client := &http.Client{Transport: transport}
++
++	// Determine size of download by consulting the headers
++	response, err := client.Head(rawURL)
 +	if err != nil {
 +		return err
 +	}
-+	defer resp.Body.Close()
 +
-+	_, err = io.Copy(out, resp.Body)
++	lenStr := response.Header.Get("Content-Length")
++	dataLen, _ := strconv.Atoi(lenStr)
++
++	request, err := http.NewRequest("GET", _url.String(), nil)
++	if err != nil {
++		return err
++	}
++
++	response, err = client.Do(request)
++	defer response.Body.Close()
++
++	reader := &ProgressReader{
++		Reader:    response.Body,
++		total:     uint64(dataLen),
++		lastShown: -1,
++		rawURL:    rawURL,
++	}
++
++	_, err = io.Copy(out, reader)
 +
 +	return err
 +}
 +
-+func fetchImage(version, libPath string) error {
-+	// TODO: Add checksum validation
-+	outfile := fmt.Sprintf("clear-%s-containers.img.xz", version)
-+	url := fmt.Sprintf("%s/releases/%s/clear/%s", clrURL, version, outfile)
-+	outpath := path.Join(libPath, outfile)
-+	var output []byte
-+
-+	logrus.Debugf("Fetching clr version: %s, %s", version, outpath)
-+	out, err := os.Create(outpath)
-+	if err != nil {
-+		return err
-+	}
-+	defer out.Close()
-+
-+	resp, err := http.Get(url)
-+	if err != nil {
-+		return err
-+	}
-+	defer resp.Body.Close()
-+
-+	// Consider progress feedback ?
-+	_, err = io.Copy(out, resp.Body)
-+
-+	if err != nil {
-+		return err
-+	}
-+
-+	// decompress the file
-+	cmd := exec.Command("unxz", outpath)
-+	cmd.Dir = libPath
-+
-+	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("Unable to extract image %s: %s", version, output)
-+		return err
-+	}
-+
-+	return nil
++// fetchLatest downloads the "latest" file which contains the version
++// number of the latest image.
++func fetchLatest(libPath string) error {
++	file := path.Join(libPath, clrFile)
++	return getURL(latestFile, file)
 +}
 +
 +// NewDriver creates a new clear linux execution driver.
@@ -178,6 +228,7 @@ index 0000000..69fb6f4
 +	if err != nil {
 +		return nil, err
 +	}
++
 +	return &driver{
 +		apparmor:         apparmor,
 +		root:             root,
@@ -191,9 +242,122 @@ index 0000000..69fb6f4
 +	}, nil
 +}
 +
++// fetchImage downloads the latest image and verifies its checksum.
++func fetchImage(version, outfile, outpath string) error {
++
++	url := fmt.Sprintf("%s/releases/%s/clear/%s", clrURL, version, outfile)
++
++	logrus.Debugf("Fetching clr version: %s, %s", version, outpath)
++
++	return getURL(url, outpath)
++}
++
++// uncompressImage handles decompressing the image specified by path.
++func uncompressImage(path string) error {
++	// decompress the file
++	cmd := exec.Command("unxz", path)
++	cmd.Dir = filepath.Dir(path)
++
++	if output, err := cmd.CombinedOutput(); err != nil {
++		return fmt.Errorf("Unable to extract image %s: %s", path, output)
++	}
++
++	return nil
++}
++
++// getChecksumLine reads the file specified and returns the checksum for
++// the filename specified.
++func getChecksumLine(file string, filename string) string {
++	data, err := ioutil.ReadFile(file)
++	if err != nil {
++		return ""
++	}
++
++	lines := strings.Split(string(data), "\n")
++
++	for _, line := range lines {
++		if strings.HasSuffix(line, filename) {
++			fields := strings.Fields(line)
++			if len(fields) == 2 {
++				return fields[0]
++			}
++		}
++	}
++
++	return ""
++}
++
++// getChecksum downloads the checksum file for the image version specified,
++// storing it under libPath, then extracts the checksum corresponding to
++// imageFile and returns it.
++func getChecksum(version string, libPath string, imageFile string) (string, error) {
++	outfile := path.Join(libPath, clrChecksumFile)
++	checkurl := fmt.Sprintf("%s/releases/%s/clear/%s", clrURL, version, clrChecksumFile)
++
++	err := getURL(checkurl, outfile)
++	if err != nil {
++		return "", err
++	}
++
++	// Now, extract the checksum from the downloaded file.
++	return getChecksumLine(outfile, imageFile), nil
++}
++
++func verifyChecksum(fullPath, expectedChecksum string) error {
++
++	if expectedChecksum == "" {
++		return errors.New("blank expectedChecksum")
++	}
++	if fullPath == "" {
++		return errors.New("blank path")
++	}
++
++	data, err := ioutil.ReadFile(fullPath)
++	if err != nil {
++		return err
++	}
++
++	calculatedChecksum := fmt.Sprintf("%x", sha512.Sum512(data))
++
++	if calculatedChecksum != expectedChecksum {
++		return fmt.Errorf("Checksum mismatch: %v %v", calculatedChecksum, expectedChecksum)
++	}
++
++	logrus.Debugf("Checksum for %v correct: %v", fullPath, expectedChecksum)
++
++	return nil
++}
++
++// alreadyDownloaded determines if the uncompressed version of the file
++// specified by outpath already exists and seems sane.
++func alreadyDownloaded(outpath string) bool {
++	// strip off the (first) extension
++	base := path.Base(outpath)
++	extension := filepath.Ext(base)
++
++	uncompressed := strings.TrimSuffix(outpath, extension)
++
++	st, err := os.Stat(uncompressed)
++
++	if err != nil {
++		return false
++	}
++
++	if st.IsDir() {
++		return false
++	}
++
++	if st.Size() == 0 {
++		return false
++	}
++
++	return true
++}
++
++// prepareClr handles downloading and checking clr images, returning the
++// version of clr that will be used.
 +func prepareClr(libPath string) (string, error) {
 +	var version = getClrVersion(libPath)
-+	var nversion string
 +	logrus.Debugf("%s preparing environment", driverName)
 +
 +	err := fetchLatest(libPath)
@@ -201,15 +365,48 @@ index 0000000..69fb6f4
 +		return "", err
 +	}
 +
-+	nversion = getClrVersion(libPath)
++	nversion := getClrVersion(libPath)
++	if nversion == "" {
++		return "", errors.New("unable to determine latest clr version")
++	}
++
++	outfile := fmt.Sprintf("clear-%s-containers.img.xz", version)
++	outpath := path.Join(libPath, outfile)
++
++	// If the download originally failed, there may be a partial .xz
++	// file. However, this will be ignored and a new download triggered
++	// since we only only check for the uncompressed file (which would
++	// only exist if the download was successful).
++	if alreadyDownloaded(outpath) && version != "" {
++		logrus.Debugf("Using clr version: %s", nversion)
++		return nversion, nil
++	}
++
++	// Determine the expected checksum for the file about to be
++	// downloaded.
++	checksum, err := getChecksum(version, libPath, outfile)
++	if err != nil {
++		return "", err
++	}
++
 +	if nversion != version && version != "" {
 +		logrus.Debugf("Updating to clr version: %s", nversion)
-+		err = fetchImage(nversion, libPath)
 +	} else if version == "" {
 +		logrus.Debugf("Installing clr version: %s", nversion)
-+		err = fetchImage(nversion, libPath)
-+	} else {
-+		logrus.Debugf("Using clr version: %s", nversion)
++	}
++
++	err = fetchImage(version, outfile, outpath)
++	if err != nil {
++		return "", err
++	}
++
++	if err = verifyChecksum(outpath, checksum); err != nil {
++		return "", err
++	}
++
++	err = uncompressImage(outpath)
++	if err != nil {
++		return "", err
 +	}
 +
 +	return nversion, nil
@@ -697,6 +894,13 @@ index 0000000..69fb6f4
 +	return ioutil.WriteFile(p, data, 0755)
 +}
 +
++func (d *driver) linkExists(name string) bool {
++	cmd := exec.Command("ip", "link", "show", name)
++	err := cmd.Run()
++
++	return err == nil
++}
++
 +func (d *driver) setupNetwork(c *execdriver.Command) error {
 +	ifname := getTapIf(c)
 +
@@ -730,14 +934,16 @@ index 0000000..69fb6f4
 +		}
 +	}
 +
-+	// Strip existing veth
-+	cmd := exec.Command("ip", "link", "del", bridgeLinkName)
-+	if output, err = cmd.CombinedOutput(); err != nil {
-+		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
-+		return err
++	// Strip existing veth if it exists
++	if bridgeLinkName != "" && d.linkExists(bridgeLinkName) {
++		cmd := exec.Command("ip", "link", "del", bridgeLinkName)
++		if output, err = cmd.CombinedOutput(); err != nil {
++			logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
++			return err
++		}
 +	}
 +
-+	cmd = exec.Command("ip", "tuntap", "add", "dev", ifname, "mode", "tap", "vnet_hdr")
++	cmd := exec.Command("ip", "tuntap", "add", "dev", ifname, "mode", "tap", "vnet_hdr")
 +	if output, err = cmd.CombinedOutput(); err != nil {
 +		logrus.Debugf("%s setupNetwork error: %v, %s", driverName, cmd.Args, output)
 +		return err
