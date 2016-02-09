@@ -1,8 +1,8 @@
 Name     : clear-containers-docker
-Version  : 1.9.0
-Release  : 4
-URL      : https://github.com/docker/docker/archive/v1.9.0.tar.gz
-Source0  : https://github.com/docker/docker/archive/v1.9.0.tar.gz
+Version  : 1.9.1
+Release  : 5
+URL      : https://github.com/docker/docker/archive/v1.9.1.tar.gz
+Source0  : https://github.com/docker/docker/archive/v1.9.1.tar.gz
 Summary  : the open-source application container engine
 Group    : Development/Tools
 License  : Apache-2.0
@@ -28,8 +28,8 @@ Conflicts : docker
 %define debug_package %{nil}
 %define __strip /bin/true
 
-# This matches v1.9.0 tag/tarball from https://github.com/docker/docker/releases
-%define commit_id 76d6bc9-clear-containers
+# This matches v1.9.1 tag/tarball from https://github.com/docker/docker/releases
+%define commit_id a34a1d5-clear-containers
 
 %description
 Docker Core Engine

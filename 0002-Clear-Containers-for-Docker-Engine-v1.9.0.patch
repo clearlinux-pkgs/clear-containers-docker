@@ -1,4 +1,4 @@
-From 8a4170a5ff88eb6b5a1e38b8c992433944072964 Mon Sep 17 00:00:00 2001
+From 0858756be77cde35f465ee4761ab2046490a1b73 Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Wed, 28 Oct 2015 16:50:00 +0000
 Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.0)
@@ -1264,7 +1264,7 @@ index ca8ea8f..fa50e45 100644
  	if i := bytes.Index(b, []byte("PRETTY_NAME")); i >= 0 {
  		b = b[i+13:]
 diff --git a/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go b/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
-index 6124ccb..83c02cd 100644
+index 8cc26f9..07280cf 100644
 --- a/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
 +++ b/vendor/src/github.com/docker/libnetwork/drivers/bridge/bridge.go
 @@ -98,6 +98,7 @@ type bridgeNetwork struct {
@@ -1275,7 +1275,7 @@ index 6124ccb..83c02cd 100644
  	sync.Mutex
  }
  
-@@ -870,11 +871,13 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
+@@ -874,11 +875,13 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
  		return err
  	}
  
@@ -1291,7 +1291,7 @@ index 6124ccb..83c02cd 100644
  		return types.InternalErrorf("failed to add the host (%s) <=> sandbox (%s) pair interfaces: %v", hostIfName, containerIfName, err)
  	}
  
-@@ -1100,6 +1103,11 @@ func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, erro
+@@ -1110,6 +1113,11 @@ func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, erro
  		m[netlabel.MacAddress] = ep.macAddress
  	}
  
