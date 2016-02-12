@@ -1,11 +1,11 @@
-From 0858756be77cde35f465ee4761ab2046490a1b73 Mon Sep 17 00:00:00 2001
+From 0a19f03d9924fc54d050d1bfc446e8dcc5a8e986 Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Wed, 28 Oct 2015 16:50:00 +0000
-Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.0)
+Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.1)
 
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
 ---
- daemon/execdriver/clr/driver.go                    | 949 +++++++++++++++++++++
+ daemon/execdriver/clr/driver.go                    | 964 +++++++++++++++++++++
  daemon/execdriver/clr/info.go                      |  51 ++
  daemon/execdriver/clr/init.go                      |  97 +++
  daemon/execdriver/driver.go                        |   6 +
@@ -14,17 +14,17 @@ Signed-off-by: James Hunt <james.o.hunt@intel.com>
  .../operatingsystem/operatingsystem_linux.go       |  13 +-
  .../docker/libnetwork/drivers/bridge/bridge.go     |  12 +-
  .../docker/libnetwork/netlabel/labels.go           |  16 +
- 9 files changed, 1172 insertions(+), 4 deletions(-)
+ 9 files changed, 1187 insertions(+), 4 deletions(-)
  create mode 100644 daemon/execdriver/clr/driver.go
  create mode 100644 daemon/execdriver/clr/info.go
  create mode 100644 daemon/execdriver/clr/init.go
 
 diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
 new file mode 100644
-index 0000000..6695309
+index 0000000..ffbde6f
 --- /dev/null
 +++ b/daemon/execdriver/clr/driver.go
-@@ -0,0 +1,949 @@
+@@ -0,0 +1,964 @@
 +// +build linux
 +
 +package clr
@@ -63,8 +63,17 @@ index 0000000..6695309
 +
 +	envVarPrefix = "CLR_"
 +
++	// variable that allows clrURL to be modified
++	clrEnvURL = envVarPrefix + "DOWNLOAD_URL"
++
 +	// Command used for lkvm control
 +	lkvmName = "lkvm"
++
++	// default value for clrURL
++	defaultClrURL = "https://download.clearlinux.org"
++
++	// upstream latest release file (found below clrURL)
++	latestFile = "latest"
 +
 +	// local "latest" information
 +	clrFile = "latest"
@@ -72,14 +81,13 @@ index 0000000..6695309
 +	// ASCII file containing a checksums for the downloaded image.
 +	clrChecksumFile = "SHA512SUMS"
 +
-+	// upstream base URL
-+	clrURL = "https://download.clearlinux.org"
-+
-+	// upstream latest release file
-+	latestFile = "https://download.clearlinux.org/latest"
-+
 +	// clr kernel (not bzimage)
 +	clrKernel = "/usr/lib/kernel/vmlinux.container"
++)
++
++var (
++	// upstream base URL
++	clrURL = defaultClrURL
 +)
 +
 +type driver struct {
@@ -212,7 +220,7 @@ index 0000000..6695309
 +// number of the latest image.
 +func fetchLatest(libPath string) error {
 +	file := path.Join(libPath, clrFile)
-+	return getURL(latestFile, file)
++	return getURL(clrURL+"/"+latestFile, file)
 +}
 +
 +// NewDriver creates a new clear linux execution driver.
@@ -357,8 +365,15 @@ index 0000000..6695309
 +// prepareClr handles downloading and checking clr images, returning the
 +// version of clr that will be used.
 +func prepareClr(libPath string) (string, error) {
-+	var version = getClrVersion(libPath)
 +	logrus.Debugf("%s preparing environment", driverName)
++
++	tmp := os.Getenv(clrEnvURL)
++	if tmp != "" {
++		clrURL = tmp
++		logrus.Debugf("%s using alternate download URL: %s", driverName, clrURL)
++	}
++
++	var version = getClrVersion(libPath)
 +
 +	err := fetchLatest(libPath)
 +	if err != nil {
@@ -370,21 +385,21 @@ index 0000000..6695309
 +		return "", errors.New("unable to determine latest clr version")
 +	}
 +
-+	outfile := fmt.Sprintf("clear-%s-containers.img.xz", version)
++	outfile := fmt.Sprintf("clear-%s-containers.img.xz", nversion)
 +	outpath := path.Join(libPath, outfile)
 +
 +	// If the download originally failed, there may be a partial .xz
 +	// file. However, this will be ignored and a new download triggered
 +	// since we only only check for the uncompressed file (which would
 +	// only exist if the download was successful).
-+	if alreadyDownloaded(outpath) && version != "" {
++	if alreadyDownloaded(outpath) && nversion == version {
 +		logrus.Debugf("Using clr version: %s", nversion)
 +		return nversion, nil
 +	}
 +
 +	// Determine the expected checksum for the file about to be
 +	// downloaded.
-+	checksum, err := getChecksum(version, libPath, outfile)
++	checksum, err := getChecksum(nversion, libPath, outfile)
 +	if err != nil {
 +		return "", err
 +	}
@@ -395,7 +410,7 @@ index 0000000..6695309
 +		logrus.Debugf("Installing clr version: %s", nversion)
 +	}
 +
-+	err = fetchImage(version, outfile, outpath)
++	err = fetchImage(nversion, outfile, outpath)
 +	if err != nil {
 +		return "", err
 +	}
