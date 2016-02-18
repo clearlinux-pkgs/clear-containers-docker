@@ -1,0 +1,40 @@
+From 967b4edb538edcf639327a75bfdeafe8473f80c7 Mon Sep 17 00:00:00 2001
+From: James Hunt <james.o.hunt@intel.com>
+Date: Thu, 18 Feb 2016 09:32:26 +0000
+Subject: [PATCH] Allow container to be stopped immediately.
+
+Thanks Anthony Xu.
+
+Signed-off-by: "Xu, Anthony" <anthony.xu@intel.com>
+Signed-off-by: James Hunt <james.o.hunt@intel.com>
+---
+ daemon/execdriver/clr/driver.go | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
+index ffbde6f..3e7c396 100644
+--- a/daemon/execdriver/clr/driver.go
++++ b/daemon/execdriver/clr/driver.go
+@@ -655,7 +655,7 @@ func getExitCode(c *execdriver.Command) int {
+ }
+ 
+ func (d *driver) lkvmCommand(c *execdriver.Command, arg string) ([]byte, error) {
+-	args := append([]string{lkvmName}, arg)
++	args := []string{arg}
+ 	if c != nil {
+ 		args = append(args, "--name", c.ID)
+ 	}
+@@ -666,6 +666,10 @@ func (d *driver) lkvmCommand(c *execdriver.Command, arg string) ([]byte, error)
+ 
+ // Kill sends a signal to workload
+ func (d *driver) Kill(c *execdriver.Command, sig int) error {
++	if sig == int(syscall.SIGKILL) || sig == int(syscall.SIGTERM) {
++		_, err := d.lkvmCommand(c, "stop")
++		return err
++	}
+ 	// Not supported
+ 	return nil
+ }
+-- 
+2.5.0
+
