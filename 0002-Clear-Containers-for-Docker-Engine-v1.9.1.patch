@@ -1,30 +1,27 @@
-From 0a19f03d9924fc54d050d1bfc446e8dcc5a8e986 Mon Sep 17 00:00:00 2001
+From 987d403c311d4883815d1a52683bf582294c974e Mon Sep 17 00:00:00 2001
 From: James Hunt <james.o.hunt@intel.com>
 Date: Wed, 28 Oct 2015 16:50:00 +0000
 Subject: [PATCH 2/3] Clear Containers for Docker Engine (v1.9.1)
 
 Signed-off-by: James Hunt <james.o.hunt@intel.com>
 ---
- daemon/execdriver/clr/driver.go                    | 964 +++++++++++++++++++++
+ daemon/execdriver/clr/driver.go                    | 984 +++++++++++++++++++++
  daemon/execdriver/clr/info.go                      |  51 ++
- daemon/execdriver/clr/init.go                      |  97 +++
+ daemon/execdriver/clr/init.go                      |  97 ++
  daemon/execdriver/driver.go                        |   6 +
  daemon/execdriver/execdrivers/execdrivers_linux.go |   6 +-
  daemon/monitor.go                                  |  26 +
  .../operatingsystem/operatingsystem_linux.go       |  13 +-
  .../docker/libnetwork/drivers/bridge/bridge.go     |  12 +-
  .../docker/libnetwork/netlabel/labels.go           |  16 +
- 9 files changed, 1187 insertions(+), 4 deletions(-)
- create mode 100644 daemon/execdriver/clr/driver.go
- create mode 100644 daemon/execdriver/clr/info.go
- create mode 100644 daemon/execdriver/clr/init.go
+ 9 files changed, 1207 insertions(+), 4 deletions(-)
 
 diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
 new file mode 100644
-index 0000000..ffbde6f
+index 0000000..5f5dff8
 --- /dev/null
 +++ b/daemon/execdriver/clr/driver.go
-@@ -0,0 +1,964 @@
+@@ -0,0 +1,984 @@
 +// +build linux
 +
 +package clr
@@ -66,6 +63,10 @@ index 0000000..ffbde6f
 +	// variable that allows clrURL to be modified
 +	clrEnvURL = envVarPrefix + "DOWNLOAD_URL"
 +
++	// variable that specifies the *full* URL to the file containing the
++	// latest release (the default value is defaultClrURL + latestFile).
++	clrEnvLatestURL = envVarPrefix + "LATEST_URL"
++
 +	// Command used for lkvm control
 +	lkvmName = "lkvm"
 +
@@ -88,6 +89,9 @@ index 0000000..ffbde6f
 +var (
 +	// upstream base URL
 +	clrURL = defaultClrURL
++
++	// upstream URL for retrieving latestFile
++	clrLatestURL string
 +)
 +
 +type driver struct {
@@ -220,7 +224,7 @@ index 0000000..ffbde6f
 +// number of the latest image.
 +func fetchLatest(libPath string) error {
 +	file := path.Join(libPath, clrFile)
-+	return getURL(clrURL+"/"+latestFile, file)
++	return getURL(clrLatestURL, file)
 +}
 +
 +// NewDriver creates a new clear linux execution driver.
@@ -367,7 +371,16 @@ index 0000000..ffbde6f
 +func prepareClr(libPath string) (string, error) {
 +	logrus.Debugf("%s preparing environment", driverName)
 +
-+	tmp := os.Getenv(clrEnvURL)
++	tmp := os.Getenv(clrEnvLatestURL)
++	if tmp != "" {
++		clrLatestURL = tmp
++		logrus.Debugf("%s using alternate latest URL: %s", driverName, clrLatestURL)
++	} else {
++		// construct the default location
++		clrLatestURL = fmt.Sprintf("%s/%s", defaultClrURL, latestFile)
++	}
++
++	tmp = os.Getenv(clrEnvURL)
 +	if tmp != "" {
 +		clrURL = tmp
 +		logrus.Debugf("%s using alternate download URL: %s", driverName, clrURL)
@@ -682,7 +695,7 @@ index 0000000..ffbde6f
 +}
 +
 +func (d *driver) lkvmCommand(c *execdriver.Command, arg string) ([]byte, error) {
-+	args := append([]string{lkvmName}, arg)
++	args := []string{arg}
 +	if c != nil {
 +		args = append(args, "--name", c.ID)
 +	}
@@ -693,6 +706,10 @@ index 0000000..ffbde6f
 +
 +// Kill sends a signal to workload
 +func (d *driver) Kill(c *execdriver.Command, sig int) error {
++	if sig == int(syscall.SIGKILL) || sig == int(syscall.SIGTERM) {
++		_, err := d.lkvmCommand(c, "stop")
++		return err
++	}
 +	// Not supported
 +	return nil
 +}
