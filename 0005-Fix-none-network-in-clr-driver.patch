@@ -1,0 +1,27 @@
+From b981c64a038a3f3fe4ad555d1c0aeffad54f95c5 Mon Sep 17 00:00:00 2001
+From: Julio Montes <julio.montes@intel.com>
+Date: Fri, 18 Mar 2016 22:40:05 +0000
+Subject: [PATCH] Fix none network in clr driver
+
+Signed-off-by: Julio Montes <julio.montes@intel.com>
+---
+ daemon/execdriver/clr/driver.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
+index 5f5dff8..bccfe07 100644
+--- a/daemon/execdriver/clr/driver.go
++++ b/daemon/execdriver/clr/driver.go
+@@ -920,6 +920,9 @@ func (d *driver) setupNetwork(c *execdriver.Command) error {
+ 
+ 	bridge := c.NetworkSettings.Networks["bridge"]
+ 	if bridge == nil {
++		if c.NetworkSettings.Networks["none"] != nil {
++			return nil
++		}
+ 		return fmt.Errorf("no bridge network available")
+ 	}
+ 
+-- 
+2.7.3
+
