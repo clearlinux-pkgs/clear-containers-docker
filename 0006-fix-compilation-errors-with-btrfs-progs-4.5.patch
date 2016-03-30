@@ -1,0 +1,26 @@
+From 768b518033dae3888750f110de75c98d48fd5426 Mon Sep 17 00:00:00 2001
+From: Julio Montes <julio.montes@intel.com>
+Date: Wed, 30 Mar 2016 12:13:00 -0600
+Subject: [PATCH] fix compilation errors with btrfs-progs-4.5
+
+Signed-off-by: Julio Montes <julio.montes@intel.com>
+---
+ daemon/graphdriver/btrfs/btrfs.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/daemon/graphdriver/btrfs/btrfs.go b/daemon/graphdriver/btrfs/btrfs.go
+index 59f98f9..893d800 100644
+--- a/daemon/graphdriver/btrfs/btrfs.go
++++ b/daemon/graphdriver/btrfs/btrfs.go
+@@ -160,7 +160,7 @@ func subvolSnapshot(src, dest, name string) error {
+ 	var args C.struct_btrfs_ioctl_vol_args_v2
+ 	args.fd = C.__s64(getDirFd(srcDir))
+ 	for i, c := range []byte(name) {
+-		args.name[i] = C.char(c)
++		args.anon1[i] = c
+ 	}
+ 
+ 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, getDirFd(destDir), C.BTRFS_IOC_SNAP_CREATE_V2,
+-- 
+2.1.0
+

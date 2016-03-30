@@ -1,6 +1,6 @@
 Name     : clear-containers-docker
 Version  : 1.9.1
-Release  : 9
+Release  : 10
 URL      : https://github.com/docker/docker/archive/v1.9.1.tar.gz
 Source0  : https://github.com/docker/docker/archive/v1.9.1.tar.gz
 Summary  : the open-source application container engine
@@ -14,6 +14,7 @@ Patch401 : 0001-Dockerfile-add-kvmtool-and-linux-container-for-clr-e.patch
 Patch402 : 0002-Clear-Containers-for-Docker-Engine-v1.9.1.patch
 Patch403 : 0003-Clear-Linux-VERSION-and-default-exec-driver.patch
 Patch5   : 0005-Fix-none-network-in-clr-driver.patch
+Patch6   : 0006-fix-compilation-errors-with-btrfs-progs-4.5.patch
 
 BuildRequires : go
 BuildRequires : glibc-staticdev
@@ -45,6 +46,7 @@ Docker Core Engine
 %patch402 -p1
 %patch403 -p1
 %patch5 -p1
+%patch6 -p1
 
 %build
 export DOCKER_GITCOMMIT=%commit_id AUTO_GOPATH=1 GOROOT=/usr/lib/golang
