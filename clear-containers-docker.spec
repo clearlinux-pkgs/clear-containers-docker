@@ -15,6 +15,7 @@ Patch402 : 0002-Clear-Containers-for-Docker-Engine-v1.9.1.patch
 Patch403 : 0003-Clear-Linux-VERSION-and-default-exec-driver.patch
 Patch5   : 0005-Fix-none-network-in-clr-driver.patch
 Patch6   : 0006-fix-compilation-errors-with-btrfs-progs-4.5.patch
+Patch7   : 0007-Add-pacrunner-call-for-proxy-resolution.patch
 
 BuildRequires : go
 BuildRequires : glibc-staticdev
@@ -47,6 +48,7 @@ Docker Core Engine
 %patch403 -p1
 %patch5 -p1
 %patch6 -p1
+%patch7 -p1
 
 %build
 export DOCKER_GITCOMMIT=%commit_id AUTO_GOPATH=1 GOROOT=/usr/lib/golang
