@@ -1,0 +1,135 @@
+From b8c1333d4bfaf9b3c90f0f545950ad468de12f0c Mon Sep 17 00:00:00 2001
+From: Archana Shinde <archana.m.shinde@intel.com>
+Date: Fri, 3 Jun 2016 16:19:57 -0700
+Subject: [PATCH clear-containers-docker] Add pacrunner call for proxy
+ resolution.
+
+Fetch the proxy from the environment first, if the environment proxy
+variables are not set query the pacrunner service to get the proxy
+for a particular URL
+---
+ daemon/execdriver/clr/driver.go | 80 +++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 74 insertions(+), 6 deletions(-)
+
+diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
+index bccfe07..fb812d9 100644
+--- a/daemon/execdriver/clr/driver.go
++++ b/daemon/execdriver/clr/driver.go
+@@ -26,6 +26,7 @@ import (
+ 	sysinfo "github.com/docker/docker/pkg/system"
+ 	"github.com/docker/docker/pkg/term"
+ 	"github.com/docker/libnetwork/netlabel"
++	"github.com/godbus/dbus"
+ 	"github.com/kr/pty"
+ 	"github.com/opencontainers/runc/libcontainer/configs"
+ )
+@@ -60,6 +61,18 @@ const (
+ 
+ 	// clr kernel (not bzimage)
+ 	clrKernel = "/usr/lib/kernel/vmlinux.container"
++
++	// pacrunner proxy service on clr
++	pacrunnerDest = "org.pacrunner"
++
++	// pacrunner dbus object path
++	pacrunnerDbusPath = "/org/pacrunner/client"
++
++	// pacrunner method
++	pacRunnerProxyMethod = "org.pacrunner.Client.FindProxyForURL"
++
++	// state file for pacdiscovery
++	proxyStateFile = "/run/pacrunner/pac_active"
+ )
+ 
+ var (
+@@ -151,6 +164,59 @@ func getClrVersion(libPath string) string {
+ 	return strings.Split(string(txt), "\n")[0]
+ }
+ 
++func queryPacrunnerProxy(request *http.Request) (*url.URL, error) {
++	conn, err := dbus.SystemBus()
++	if err != nil {
++		return nil, err
++	}
++
++	busObject := conn.Object(pacrunnerDest, pacrunnerDbusPath)
++
++	call := busObject.Call(pacRunnerProxyMethod, 0, request.URL.String(), request.URL.Host)
++	if call.Err != nil {
++		return nil, err
++	}
++
++	var ret string
++	err = call.Store(&ret)
++	if err != nil {
++		return nil, err
++	}
++
++	if strings.HasPrefix(ret, "PROXY ") {
++		proxy := ret[6:]
++		proxyURL, err := url.Parse(proxy)
++		if err != nil || !strings.HasPrefix(proxyURL.Scheme, "http") {
++			if proxyURL, err := url.Parse("http://" + proxy); err == nil {
++				return proxyURL, nil
++			}
++		}
++
++		if err != nil {
++			return nil, fmt.Errorf("invalid proxy address %q: %v", proxy, err)
++		}
++	}
++
++	//Fallback for DIRECT connection
++	return nil, nil
++}
++
++func getProxy(request *http.Request) (*url.URL, error) {
++	proxy_url, err := http.ProxyFromEnvironment(request)
++	if err != nil {
++		return nil, err
++	}
++
++	if proxy_url != nil {
++		return proxy_url, err
++	}
++
++	if _, err := os.Stat(proxyStateFile); os.IsNotExist(err) {
++		return nil, nil
++	}
++	return queryPacrunnerProxy(request)
++}
++
+ func getURL(rawURL, outfile string) error {
+ 
+ 	_url, err := url.Parse(rawURL)
+@@ -164,7 +230,14 @@ func getURL(rawURL, outfile string) error {
+ 	}
+ 	defer out.Close()
+ 
+-	transport := &http.Transport{Proxy: http.ProxyFromEnvironment}
++	request, err := http.NewRequest("GET", _url.String(), nil)
++	if err != nil {
++		return err
++	}
++
++	proxyUrl, _ := getProxy(request)
++
++	transport := &http.Transport{Proxy: http.ProxyURL(proxyUrl)}
+ 	client := &http.Client{Transport: transport}
+ 
+ 	// Determine size of download by consulting the headers
+@@ -176,11 +249,6 @@ func getURL(rawURL, outfile string) error {
+ 	lenStr := response.Header.Get("Content-Length")
+ 	dataLen, _ := strconv.Atoi(lenStr)
+ 
+-	request, err := http.NewRequest("GET", _url.String(), nil)
+-	if err != nil {
+-		return err
+-	}
+-
+ 	response, err = client.Do(request)
+ 	defer response.Body.Close()
+ 
+-- 
+2.1.4
+
