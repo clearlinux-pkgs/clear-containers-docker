@@ -1,0 +1,28 @@
+From 248872babe4612511638152d14b43f05c4e621db Mon Sep 17 00:00:00 2001
+From: Archana Shinde <archana.m.shinde@intel.com>
+Date: Fri, 10 Jun 2016 16:20:54 -0700
+Subject: [PATCH clear-containers-docker] Disable systemd-networkd
+
+Network is not getting configured due to a policy change introduced in systemd
+in version 228. (https://github.com/systemd/systemd/commit/5e5b137acc7094c9a1b8e7634b426dd445688bf0)
+Disabling systemd for this reason so that the network is configured correctly
+via kernel params.
+---
+ daemon/execdriver/clr/driver.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/daemon/execdriver/clr/driver.go b/daemon/execdriver/clr/driver.go
+index fb812d9..962aebc 100644
+--- a/daemon/execdriver/clr/driver.go
++++ b/daemon/execdriver/clr/driver.go
+@@ -602,6 +602,7 @@ func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, hooks execd
+ 
+ 	rootParams := fmt.Sprintf("root=/dev/plkvm0p1 rootfstype=ext4 rootflags=dax,data=ordered "+
+ 		"init=/usr/lib/systemd/systemd systemd.unit=container.target rw tsc=reliable "+
++		"systemd.mask=systemd-networkd.service "+
+ 		"systemd.show_status=false "+
+ 		"no_timer_check rcupdate.rcu_expedited=1 console=hvc0 quiet ip=%s::%s::%s::off",
+ 		d.ipaddr, d.gateway, hostname)
+-- 
+2.1.4
+
