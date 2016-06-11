@@ -1,6 +1,6 @@
 Name     : clear-containers-docker
 Version  : 1.9.1
-Release  : 13
+Release  : 14
 URL      : https://github.com/docker/docker/archive/v1.9.1.tar.gz
 Source0  : https://github.com/docker/docker/archive/v1.9.1.tar.gz
 Summary  : the open-source application container engine
