@@ -304,7 +304,7 @@ index 0000000..5f5dff8
 +// imageFile and returns it.
 +func getChecksum(version string, libPath string, imageFile string) (string, error) {
 +	outfile := path.Join(libPath, clrChecksumFile)
-+	checkurl := fmt.Sprintf("%s/releases/%s/clear/%s", clrURL, version, clrChecksumFile)
++	checkurl := fmt.Sprintf("%s/releases/%s/clear/%s", clrURL, version,  imageFile+"-"+clrChecksumFile)
 +
 +	err := getURL(checkurl, outfile)
 +	if err != nil {
